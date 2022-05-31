@@ -1,5 +1,6 @@
 package ru.vasilev.mlplayer;
 
+import static ru.vasilev.mlplayer.R.id.genre;
 import static ru.vasilev.mlplayer.R.id.openEqualizer;
 import static ru.vasilev.mlplayer.R.id.openFile;
 import static ru.vasilev.mlplayer.R.id.play_pause;
@@ -21,6 +22,8 @@ import android.widget.ImageView;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 
@@ -30,37 +33,24 @@ import org.tensorflow.lite.support.tensorbuffer.TensorBuffer;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
-import java.util.Arrays;
 import java.util.Date;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
-import be.tarsos.dsp.io.android.AndroidFFMPEGLocator;
-import cafe.adriel.androidaudioconverter.AndroidAudioConverter;
-import cafe.adriel.androidaudioconverter.callback.ILoadCallback;
+import ru.vasilev.mlplayer.data.Genre;
 import ru.vasilev.mlplayer.ml.Model;
 import ru.vasilev.mlplayer.nn.Preprocessor;
 
 public class MainActivity extends AppCompatActivity {
     public static final int PERMISSION_EXTERNAL_STORAGE = 1;
     private MediaPlayer mediaPlayer;
+    private Genre genre;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         mediaPlayer = new MediaPlayer();
-        AndroidAudioConverter.load(this, new ILoadCallback() {
-            @Override
-            public void onSuccess() {
-                // Great!
-            }
-
-            @Override
-            public void onFailure(Exception error) {
-                // FFmpeg is not supported by device
-            }
-        });
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         setContentView(R.layout.activity_main);
         findViewById(openFile).setOnClickListener(this::clickBtn);
@@ -73,8 +63,6 @@ public class MainActivity extends AppCompatActivity {
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("application/pdf");
 
-        // Optionally, specify a URI for the file that should appear in the
-        // system file picker when it loads.
         intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, pickerInitialUri);
 
         startActivityForResult(intent, 1);
@@ -86,9 +74,6 @@ public class MainActivity extends AppCompatActivity {
                 ActivityCompat.requestPermissions(this,
                                                   new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},
                                                   PERMISSION_EXTERNAL_STORAGE);
-//                OpenFileDialog openFileDialog = new OpenFileDialog(MainActivity.this)
-//                        .setOpenDialogListener(this::openSong);
-//                openFileDialog.show();
 
                 Intent intent = new Intent()
                         .setType("*/*")
@@ -107,6 +92,7 @@ public class MainActivity extends AppCompatActivity {
                 break;
             case openEqualizer:
                 intent = new Intent(getApplicationContext(), EqualizerActivity.class);
+                intent.putExtra("genre", genre);
                 startActivity(intent);
                 break;
         }
@@ -128,7 +114,6 @@ public class MainActivity extends AppCompatActivity {
                 TextView currentPosition = findViewById(R.id.current_position);
                 currentPosition.setText(getFormattedTime(mediaPlayer.getCurrentPosition()));
             };
-            new AndroidFFMPEGLocator(this);
 
 
             Preprocessor preprocessor = new Preprocessor();
@@ -138,21 +123,43 @@ public class MainActivity extends AppCompatActivity {
                 a[i] = (float) preprocess[i];
             }
 //            float[][] a = preprocessor.preprocess(fileName.getFileDescriptor());
-            try {
-                Model model = Model.newInstance(getApplicationContext());
+            genre = getGenre(fileName);
+            TextView genreTextView = findViewById(R.id.genre);
+            if (genre != null) {
+                genreTextView.setText(genre.toString());
+            }else {
+                try {
+                    Model model = Model.newInstance(getApplicationContext());
 
-                // Creates inputs for reference.
-                TensorBuffer inputFeature0 = TensorBuffer.createFixedSize(new int[]{1, 64, 173, 1}, DataType.FLOAT32);
-                inputFeature0.loadArray(a);
+                    // Creates inputs for reference.
+                    TensorBuffer inputFeature0 = TensorBuffer.createFixedSize(new int[]{1, 64, 173, 1}, DataType.FLOAT32);
+                    inputFeature0.loadArray(a);
 
-                // Runs model inference and gets result.
-                Model.Outputs outputs = model.process(inputFeature0);
-                TensorBuffer outputFeature0 = outputs.getOutputFeature0AsTensorBuffer();
+                    // Runs model inference and gets result.
+                    Model.Outputs outputs = model.process(inputFeature0);
+                    TensorBuffer outputFeature0 = outputs.getOutputFeature0AsTensorBuffer();
+                    int maxAt = 0;
+                    float[] array = outputFeature0.getFloatArray();
+                    for (int i = 0; i < array.length; i++) {
+                        maxAt = array[i] > array[maxAt] ? i : maxAt;
+                    }
 
-                // Releases model resources if no longer used.
-                model.close();
-            } catch (IOException e) {
-                // TODO Handle the exception
+                    genreTextView.setText(Genre.values()[maxAt].toString());
+
+                    // Releases model resources if no longer used.
+                    model.close();
+                } catch (IOException e) {
+                    AlertDialog.Builder builder = new AlertDialog.Builder(this);
+                    builder.setTitle("Ошибка")
+                           .setMessage("Ошибка нейросети")
+                           .setIcon(R.drawable.open_file)
+                           .setPositiveButton("ОК", (dialog, id) -> {
+                               // Закрываем окно
+                               dialog.cancel();
+                           });
+                    builder.create()
+                           .show();
+                }
             }
 
 //            org.tensorflow.lite.support.audio.TensorAudio.create(AudioFormat.ENCODING_MP3, )
@@ -164,7 +171,16 @@ public class MainActivity extends AppCompatActivity {
             scheduledExecutorService.scheduleAtFixedRate(task, 0, 500, TimeUnit.MILLISECONDS);
             mediaPlayer.start();
         } catch (IOException e) {
-            e.printStackTrace();
+            AlertDialog.Builder builder = new AlertDialog.Builder(this);
+            builder.setTitle("Ошибка")
+                   .setMessage("Ошибка при загрузке аудиофайла")
+                   .setIcon(R.drawable.open_file)
+                   .setPositiveButton("ОК", (dialog, id) -> {
+                       // Закрываем окно
+                       dialog.cancel();
+                   });
+            builder.create()
+                   .show();
         }
     }
 
@@ -181,7 +197,6 @@ public class MainActivity extends AppCompatActivity {
         setImage(metadataRetriever);
         String artist = metadataRetriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST);
         String title = metadataRetriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE);
-        String genre = metadataRetriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_GENRE);
         TextView viewById = findViewById(R.id.songname);
         viewById.setText(String.format("%s - %s", artist, title));
         ProgressBar currentPosition = findViewById(R.id.progressBar);
@@ -189,8 +204,19 @@ public class MainActivity extends AppCompatActivity {
         currentPosition.setMax(max);
         TextView finish = findViewById(R.id.finish);
         finish.setText(getFormattedTime(max));
-        TextView genreTextView = findViewById(R.id.genre);
-        genreTextView.setText(genre);
+//        genreTextView.setText(genre);
+    }
+
+    @NonNull
+    private Genre getGenre(AssetFileDescriptor fileName) {
+        MediaMetadataRetriever metadataRetriever = new MediaMetadataRetriever();
+        metadataRetriever.setDataSource(fileName.getFileDescriptor());
+        String genre = metadataRetriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_GENRE);
+        try {
+            return Genre.valueOf(genre.toUpperCase());
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private void setImage(MediaMetadataRetriever metadataRetriever) {
@@ -212,7 +238,7 @@ public class MainActivity extends AppCompatActivity {
             Uri selectedfile = data.getData(); //The uri with the location of the file
             try {
                 AssetFileDescriptor assetFileDescriptor = getApplicationContext().getContentResolver()
-                                                               .openAssetFileDescriptor(selectedfile, "r");
+                                                                                 .openAssetFileDescriptor(selectedfile, "r");
                 openSong(assetFileDescriptor);
             } catch (FileNotFoundException e) {
                 e.printStackTrace();

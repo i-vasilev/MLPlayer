@@ -1,15 +1,15 @@
 package ru.vasilev.mlplayer.nn;
 
-import android.content.Context;
+import static ru.vasilev.mlplayer.utils.DataConverter.getDoubles;
+
 import android.util.Log;
 
-import java.io.File;
 import java.io.FileDescriptor;
 import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Arrays;
+import java.util.Random;
 
 import be.tarsos.dsp.AudioDispatcher;
 import be.tarsos.dsp.AudioEvent;
@@ -17,42 +17,25 @@ import be.tarsos.dsp.AudioProcessor;
 import be.tarsos.dsp.io.TarsosDSPAudioFormat;
 import be.tarsos.dsp.io.UniversalAudioInputStream;
 import be.tarsos.dsp.mfcc.MFCC;
-import cafe.adriel.androidaudioconverter.AndroidAudioConverter;
-import cafe.adriel.androidaudioconverter.callback.IConvertCallback;
-import cafe.adriel.androidaudioconverter.model.AudioFormat;
 
 public class Preprocessor {
-    public void convertToMp3(String resource, Context context) {
-        File file = new File(resource);
-        IConvertCallback callback = new IConvertCallback() {
-            @Override
-            public void onSuccess(File convertedFile) {
-                Log.d("converter", "CONVERTED");
-            }
-
-            @Override
-            public void onFailure(Exception error) {
-                Log.e("converter", "failed", error);
-            }
-        };
-        AndroidAudioConverter.with(context)
-                             .setFile(file)
-                             .setFormat(AudioFormat.WAV)
-                             .setCallback(callback)
-                             .convert();
-    }
 
     public double[] preprocess(FileDescriptor resource) throws IOException {
-        int sampleRate = 44100;
+        double[] doubles = mfcc(resource);
+        return doubles;
+}
+
+    private double[] mfcc(FileDescriptor resource) throws IOException {
+        int sampleRate = 22050;
         //set parameters, And these are same as the python librosa library
         //window size
-        int bufferSize = 2048;
+        int bufferSize = 512;
         //the step of two frame
-        int bufferOverlap = bufferSize - 512;
+        int bufferOverlap = bufferSize - 256;
         int fmin = 30;
         int fmax = 3000;//(int) (sampleRate*0.5);
         int n_cep_mel = 64;
-        int n_mels = 128;
+        int n_mels = 64;
         final double[][] mfccList = new double[173][];
         try (InputStream is = new FileInputStream(resource)) {
 
@@ -77,14 +60,11 @@ public class Preprocessor {
 
                 @Override
                 public boolean process(AudioEvent audioEvent) {
-                    if (k[1] > 200) {
+                    if (k[1] > new Random().nextInt(300)) {
                         float[] mfccOutput = mfcc.getMFCC();
                         mfccOutput = Arrays.copyOfRange(mfccOutput, 0,
                                                         mfccOutput.length);
-                        double[] mfccDouble = new double[mfccOutput.length];
-                        for (int i = 0; i < mfccOutput.length; i++) {
-                            mfccDouble[i] = mfccOutput[i];
-                        }
+                        double[] mfccDouble = getDoubles(mfccOutput);
                         mfccList[k[0]++] = mfccDouble;
                         if (k[0] == 173)
                             dispatcher.stop();
@@ -95,14 +75,11 @@ public class Preprocessor {
                 }
             });
             dispatcher.run();// starts a new thread
-
             return Arrays.stream(mfccList)
-                         .flatMapToDouble(Arrays::stream)
-                         .toArray();
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
+                            .flatMapToDouble(Arrays::stream)
+                            .toArray();
         }
-        return new double[0];
+
     }
 
 }

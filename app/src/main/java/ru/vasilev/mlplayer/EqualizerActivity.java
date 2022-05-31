@@ -1,5 +1,6 @@
 package ru.vasilev.mlplayer;
 
+import android.content.Intent;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.AdapterView;
@@ -10,10 +11,12 @@ import android.widget.Spinner;
 import androidx.appcompat.app.AppCompatActivity;
 
 import java.util.Arrays;
+import java.util.stream.IntStream;
 
 import ru.vasilev.mlplayer.data.Genre;
 
 public class EqualizerActivity extends AppCompatActivity {
+    private Genre genre;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -28,6 +31,8 @@ public class EqualizerActivity extends AppCompatActivity {
                                                                    strings);
         Spinner spinner = (Spinner) findViewById(R.id.genre);
         spinner.setAdapter(formArrayAdapter);
+
+        Intent intent = getIntent();
         spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> adapterView, View view, int i, long l) {
@@ -39,6 +44,14 @@ public class EqualizerActivity extends AppCompatActivity {
 
             }
         });
+        genre = (Genre) intent.getExtras()
+                                    .get("genre");
+        load(genre);
+        int genre_index = IntStream.range(0, Genre.values().length)
+                                   .filter(i -> genre.equals(Genre.values()[i]))
+                                   .findFirst() // first occurrence
+                                   .orElse(-1);
+        spinner.setSelection(genre_index);
     }
 
     private void save(View view) {
@@ -48,9 +61,12 @@ public class EqualizerActivity extends AppCompatActivity {
         bytes[2] = (byte) ((SeekBar) findViewById(R.id.seekBar1k)).getProgress();
         bytes[3] = (byte) ((SeekBar) findViewById(R.id.seekBar3k)).getProgress();
         bytes[4] = (byte) ((SeekBar) findViewById(R.id.seekBar12k)).getProgress();
+        getIntent().putExtra("genre", genre);
+        finish();
     }
 
     private void load(Genre genre) {
+        this.genre = genre;
         ((SeekBar) findViewById(R.id.seekBar60)).setProgress(genre.getEqualizer()[0]);
         ((SeekBar) findViewById(R.id.seekBar100)).setProgress(genre.getEqualizer()[1]);
         ((SeekBar) findViewById(R.id.seekBar1k)).setProgress(genre.getEqualizer()[2]);
